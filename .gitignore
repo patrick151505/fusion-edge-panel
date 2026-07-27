@@ -11,11 +11,21 @@ node_modules
 dist
 dist-ssr
 *.local
+.vite
 
 # Environment
 .env
 .env.*
 !.env.example
+
+# OS / editor junk
+desktop.ini
+Thumbs.db
+ehthumbs.db
+$RECYCLE.BIN/
+
+# Scratch probe scripts
+__*.mjs
 
 # Editor directories and files
 .vscode/*
