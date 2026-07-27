@@ -98,11 +98,18 @@ export async function createAttribute(
   return { data: { ...data, terms: [] }, error: null };
 }
 
-/** Add a term (value) to a global attribute, e.g. Color → Oak. */
+/**
+ * Add a term (value) to an attribute.
+ *
+ * Pass `productId` to make it private to that product (WooCommerce's custom
+ * value); leave it null and the value joins the global pool, available to
+ * every product.
+ */
 export async function createTerm(
   attributeId: string,
   name: string,
-  swatch: string | null
+  swatch: string | null,
+  productId: string | null = null
 ): Promise<{ data: AttributeTerm | null; error: string | null }> {
   const { data, error } = await supabase
     .from("attribute_terms")
@@ -111,6 +118,7 @@ export async function createTerm(
       name: name.trim(),
       slug: slugify(name),
       swatch: swatch?.trim() || null,
+      product_id: productId,
     })
     .select("id, name, slug, swatch, position")
     .single();

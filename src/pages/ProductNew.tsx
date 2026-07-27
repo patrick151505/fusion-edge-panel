@@ -151,6 +151,17 @@ export default function ProductNew() {
       return;
     }
 
+    // An attribute with no values would be silently dropped on save — block it.
+    const emptyAttr = assignments.find((a) => a.term_ids.length === 0);
+    if (emptyAttr) {
+      const attrName =
+        attributes.find((p) => p.id === emptyAttr.attribute_id)?.name ??
+        "An attribute";
+      const msg = `${attrName} has no values selected. Pick at least one value or remove it.`;
+      notify("error", "Check the attributes", msg);
+      return;
+    }
+
     const create: ProductCreate = {
       kind,
       name: name.trim(),

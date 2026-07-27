@@ -57,7 +57,8 @@ const inputClass =
 export default function ProductEditPage() {
   const { slug } = useParams<{ slug: string }>();
   const { product, loading, error } = useProduct(slug);
-  const { attributes, reload: reloadAttributes } = useAttributes();
+  // Scope the attribute pool to this product: globals + its own private values.
+  const { attributes, reload: reloadAttributes } = useAttributes(product?.id);
   const { categories } = useCategories();
   const { notify } = useToast();
   const navigate = useNavigate();
@@ -240,6 +241,19 @@ export default function ProductEditPage() {
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       notify("error", "Check the form", "Some fields need attention.");
+      return;
+    }
+
+    // An attribute with no values chosen can't be saved (it would be silently
+    // dropped), so flag it by name instead of losing it on a "success" save.
+    const emptyAttr = assignments.find((a) => a.term_ids.length === 0);
+    if (emptyAttr) {
+      const name =
+        attributes.find((p) => p.id === emptyAttr.attribute_id)?.name ??
+        "An attribute";
+      const msg = `${name} has no values selected. Pick at least one value or remove it.`;
+      setFormError(msg);
+      notify("error", "Check the attributes", msg);
       return;
     }
 
@@ -452,6 +466,7 @@ export default function ProductEditPage() {
                 onPoolChange={reloadAttributes}
                 notify={notify}
                 isVariable={isVariable}
+                productId={product.id}
               />
             )}
 

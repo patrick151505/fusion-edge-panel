@@ -24,6 +24,12 @@ type Props = {
    * every attribute stays a spec — no dead pickers.
    */
   isVariable: boolean;
+  /**
+   * When set, values added here are private to this product (not the shared
+   * pool). Null/absent means new values would be global — used before the
+   * product exists.
+   */
+  productId?: string | null;
 };
 
 export default function AttributeBuilder({
@@ -33,6 +39,7 @@ export default function AttributeBuilder({
   onPoolChange,
   notify,
   isVariable,
+  productId = null,
 }: Props) {
   const [picker, setPicker] = useState("");
   const [newAttrName, setNewAttrName] = useState("");
@@ -116,7 +123,8 @@ export default function AttributeBuilder({
       swatch = url;
     }
 
-    const { data, error } = await createTerm(attr.id, name, swatch);
+    // Inside a product, values are private to it; otherwise global.
+    const { data, error } = await createTerm(attr.id, name, swatch, productId);
     if (error || !data) {
       notify("error", "Could not add value", error ?? "Failed.");
       return;
@@ -302,6 +310,11 @@ export default function AttributeBuilder({
                 Add value
               </button>
             </div>
+            <p className="mb-3 text-theme-xs text-gray-400">
+              {productId
+                ? "Values added here belong to this product only. Manage shared values on the Attributes page."
+                : "Values added here join the shared library for all products."}
+            </p>
 
             {isVariable && (
               <label className="flex items-center gap-2 cursor-pointer">
