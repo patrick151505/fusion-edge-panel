@@ -24,6 +24,40 @@ export type CategoryFull = Category & {
   product_count?: number;
 };
 
+export type Brand = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+/** A brand row with the management fields the admin page edits. */
+export type BrandFull = Brand & {
+  description: string | null;
+  logo_url: string | null;
+  position: number;
+  /** Company ids this brand belongs to (many-to-many). */
+  company_ids?: string[];
+  /** Number of products with this brand — filled in by the admin query. */
+  product_count?: number;
+};
+
+export type Company = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+/** A company row with the management fields the admin page edits. */
+export type CompanyFull = Company & {
+  description: string | null;
+  logo_url: string | null;
+  position: number;
+  /** Brand ids assigned to this company (edited on the Company page). */
+  brand_ids?: string[];
+  /** Number of brands under this company — filled in by the admin query. */
+  brand_count?: number;
+};
+
 export type DisplayType = "select" | "button" | "color" | "image";
 
 export type AttributeTerm = {
@@ -33,6 +67,12 @@ export type AttributeTerm = {
   /** Hex for a `color` attribute, image url for `image`. */
   swatch: string | null;
   position: number;
+  /**
+   * Owning product for a private value; null (or absent) means a shared/global
+   * value. Only present when the pool was loaded with a productId — used to
+   * decide whether a value may be edited from the product page.
+   */
+  product_id?: string | null;
 };
 
 export type Attribute = {
@@ -88,6 +128,8 @@ export type Product = {
   published: boolean;
   created_at: string;
   category: Category | null;
+  brand: Brand | null;
+  company: Company | null;
   images: ProductImage[];
 };
 

@@ -2,11 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import type { ProductDetail } from "../types/catalogue";
 
-const SELECT = `
+// Relations that need the 0005_brands / 0007 migrations. Kept separate so we
+// can fall back to a brand/company-free query until those migrations run,
+// rather than breaking every product page (the join errors otherwise).
+const BRAND_SELECT = `
+  brand:brands ( id, name, slug ),
+  company:companies ( id, name, slug ),`;
+
+const buildSelect = (withBrand: boolean) => `
   id, name, slug, sku, kind, description, short_description,
   price_cents, sale_price_cents, price_max_cents,
   in_stock, featured, published, created_at,
   category:categories ( id, name, slug ),
+  ${withBrand ? BRAND_SELECT : ""}
   images:product_images ( id, url, alt, position, variation_id ),
   product_attributes (
     id, used_for_variations, position, default_term_id,
@@ -65,11 +73,22 @@ export function useProduct(slug: string | undefined) {
     setLoading(true);
     setError(null);
 
-    const { data, error } = await supabase
+    // Prefer the brand-aware query; fall back to a brand-free one until the
+    // 0005_brands migration has been run (otherwise the join errors out and
+    // the whole product page fails to load).
+    let { data, error } = await supabase
       .from("products")
-      .select(SELECT)
+      .select(buildSelect(true))
       .eq("slug", slug)
       .maybeSingle();
+
+    if (error && /brand|compan/i.test(error.message)) {
+      ({ data, error } = await supabase
+        .from("products")
+        .select(buildSelect(false))
+        .eq("slug", slug)
+        .maybeSingle());
+    }
 
     if (error) {
       setError(error.message);

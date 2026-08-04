@@ -111,17 +111,31 @@ export async function createTerm(
   swatch: string | null,
   productId: string | null = null
 ): Promise<{ data: AttributeTerm | null; error: string | null }> {
+  const base = {
+    attribute_id: attributeId,
+    name: name.trim(),
+    slug: slugify(name),
+    swatch: swatch?.trim() || null,
+  };
+
   const { data, error } = await supabase
     .from("attribute_terms")
-    .insert({
-      attribute_id: attributeId,
-      name: name.trim(),
-      slug: slugify(name),
-      swatch: swatch?.trim() || null,
-      product_id: productId,
-    })
+    .insert({ ...base, product_id: productId })
     .select("id, name, slug, swatch, position")
     .single();
+
+  // Until add_product_owned_terms.sql is run, product_id doesn't exist —
+  // fall back to a plain (global) insert so adding values still works.
+  if (error && /product_id/.test(error.message)) {
+    const retry = await supabase
+      .from("attribute_terms")
+      .insert(base)
+      .select("id, name, slug, swatch, position")
+      .single();
+    if (retry.error || !retry.data)
+      return { data: null, error: retry.error?.message ?? "Failed." };
+    return { data: retry.data, error: null };
+  }
 
   if (error || !data) return { data: null, error: error?.message ?? "Failed." };
   return { data, error: null };

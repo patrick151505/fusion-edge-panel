@@ -10,3 +10,8 @@ if (!url || !anonKey) {
 }
 
 export const supabase = createClient(url, anonKey);
+
+// Exposed for the XHR upload path, which talks to the Storage REST endpoint
+// directly to get progress events the JS client doesn't provide.
+export const SUPABASE_URL = url;
+export const SUPABASE_ANON_KEY = anonKey;

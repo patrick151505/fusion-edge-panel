@@ -7,6 +7,7 @@ import {
   ChevronDownIcon,
   FolderIcon,
   GridIcon,
+  GroupIcon,
   HorizontaLDots,
 } from "../icons";
 import { useSidebar } from "../context/SidebarContext";
@@ -39,6 +40,8 @@ const productAdminItem: NavItem = {
   subItems: [
     { name: "All products", path: "/product" },
     { name: "Categories", path: "/product/categories" },
+    { name: "Brands", path: "/product/brands" },
+    { name: "Companies", path: "/product/companies" },
     { name: "Attributes", path: "/product/attributes" },
   ],
 };
@@ -49,6 +52,13 @@ const mediaNavItem: NavItem = {
   path: "/media",
 };
 
+/** Admin-only user & role management. */
+const usersNavItem: NavItem = {
+  icon: <GroupIcon />,
+  name: "Users",
+  path: "/users",
+};
+
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const { isAdmin } = useAuth();
@@ -57,7 +67,7 @@ const AppSidebar: React.FC = () => {
   // Attribute management and Media are admin-only, so non-admins get the
   // plain Product link and no Media entry.
   const navItems: NavItem[] = isAdmin
-    ? [dashboardItem, productAdminItem, mediaNavItem]
+    ? [dashboardItem, productAdminItem, mediaNavItem, usersNavItem]
     : [dashboardItem, productItem];
 
   const [openSubmenu, setOpenSubmenu] = useState<{

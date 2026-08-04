@@ -2,12 +2,23 @@ import { useState } from "react";
 import Label from "../form/Label";
 import Input from "../form/input/InputField";
 import MediaPicker from "../media/MediaPicker";
+import { Modal } from "../ui/modal";
 import {
   createAttribute,
   createTerm,
+  updateTerm,
   type AttributeAssignment,
 } from "../../lib/attributes";
 import type { AttributeWithTerms, DisplayType } from "../../types/catalogue";
+
+/** A value typed on the New page, not yet written to the database. */
+export type PendingTerm = {
+  /** Temporary id (tmp:…) used only in the UI until the product is created. */
+  tempId: string;
+  attribute_id: string;
+  name: string;
+  swatch: string | null;
+};
 
 type Props = {
   /** The global attribute pool. */
@@ -26,10 +37,26 @@ type Props = {
   isVariable: boolean;
   /**
    * When set, values added here are private to this product (not the shared
-   * pool). Null/absent means new values would be global — used before the
-   * product exists.
+   * pool) and are written immediately. When null/absent (the New page, where
+   * the product doesn't exist yet) new values are NOT written to the global
+   * pool — they're deferred: reported via `onPendingTerm` and persisted as
+   * product-owned values only once the product is created.
    */
   productId?: string | null;
+  /**
+   * Called on the New page when a value is added, so the parent can hold it
+   * locally and persist it (product-owned) at create time. Required for
+   * deferred values to work when `productId` is null.
+   */
+  onPendingTerm?: (term: PendingTerm) => void;
+  /**
+   * Called on the New page when a not-yet-saved (pending) value is edited, so
+   * the parent can update its local copy. Keyed by the value's temp id.
+   */
+  onEditPendingTerm?: (
+    tempId: string,
+    patch: { name: string; swatch: string | null }
+  ) => void;
 };
 
 export default function AttributeBuilder({
@@ -40,6 +67,8 @@ export default function AttributeBuilder({
   notify,
   isVariable,
   productId = null,
+  onPendingTerm,
+  onEditPendingTerm,
 }: Props) {
   const [picker, setPicker] = useState("");
   const [newAttrName, setNewAttrName] = useState("");
@@ -53,6 +82,64 @@ export default function AttributeBuilder({
   const [imageDraft, setImageDraft] = useState<Record<string, string>>({});
   // Which attribute's image URL the media picker is filling, or null.
   const [pickerAttr, setPickerAttr] = useState<string | null>(null);
+
+  // A product-owned value being edited (name + color/image). Only product-
+  // owned or pending values are editable here; globals are read-only because
+  // changing them would affect every product.
+  const [editValue, setEditValue] = useState<{
+    termId: string;
+    name: string;
+    swatch: string;
+    type: DisplayType;
+    /** true when this is a not-yet-saved pending value (temp id). */
+    pending: boolean;
+  } | null>(null);
+  // True while the media picker is open FOR the value-edit modal.
+  const [editValuePicker, setEditValuePicker] = useState(false);
+
+  /** Whether a value may be edited from this product page:
+   *  - persisted values only when they belong to THIS product (product_id === productId)
+   *  - pending values (temp ids on the New page) are always this product's */
+  const canEditTerm = (term: { id: string; product_id?: string | null }) => {
+    if (term.id.startsWith("tmp:")) return true;
+    return !!productId && term.product_id === productId;
+  };
+
+  const saveEditValue = async () => {
+    if (!editValue || !editValue.name.trim()) return;
+    const name = editValue.name.trim();
+    let swatch: string | null = editValue.swatch.trim() || null;
+
+    if (editValue.type === "color" && !swatch) swatch = "#000000";
+    if (editValue.type === "image") {
+      if (!swatch) {
+        notify("error", "Image required", "Choose or paste an image URL.");
+        return;
+      }
+      if (!/^https?:\/\/|^\//.test(swatch)) {
+        notify("error", "Bad image URL", "URL must start with http(s):// or /.");
+        return;
+      }
+    }
+
+    // Pending values live only in the parent's local state until save.
+    if (editValue.pending) {
+      onEditPendingTerm?.(editValue.termId, { name, swatch });
+      setEditValue(null);
+      setEditValuePicker(false);
+      return;
+    }
+
+    const { error } = await updateTerm(editValue.termId, name, swatch);
+    if (error) {
+      notify("error", "Could not update value", error);
+      return;
+    }
+    notify("success", "Value updated", name);
+    setEditValue(null);
+    setEditValuePicker(false);
+    onPoolChange();
+  };
 
   const used = new Set(value.map((a) => a.attribute_id));
   const available = pool.filter((a) => !used.has(a.id));
@@ -123,15 +210,36 @@ export default function AttributeBuilder({
       swatch = url;
     }
 
-    // Inside a product, values are private to it; otherwise global.
+    const clearDrafts = () => {
+      setTermDraft((d) => ({ ...d, [attr.id]: "" }));
+      setSwatchDraft((d) => ({ ...d, [attr.id]: "#000000" }));
+      setImageDraft((d) => ({ ...d, [attr.id]: "" }));
+    };
+
+    // New page (no product yet): defer. Don't touch the global pool — keep the
+    // value local until the product is created, then it's saved product-owned.
+    if (!productId) {
+      if (!onPendingTerm) {
+        notify("error", "Can't add value yet", "Save the product first.");
+        return;
+      }
+      const tempId = `tmp:${Date.now().toString(36)}${Math.random()
+        .toString(36)
+        .slice(2, 7)}`;
+      onPendingTerm({ tempId, attribute_id: attr.id, name, swatch });
+      clearDrafts();
+      // Auto-select the value we just added.
+      toggleTerm(attr.id, tempId);
+      return;
+    }
+
+    // Inside an existing product, values are private to it and persisted now.
     const { data, error } = await createTerm(attr.id, name, swatch, productId);
     if (error || !data) {
       notify("error", "Could not add value", error ?? "Failed.");
       return;
     }
-    setTermDraft((d) => ({ ...d, [attr.id]: "" }));
-    setSwatchDraft((d) => ({ ...d, [attr.id]: "#000000" }));
-    setImageDraft((d) => ({ ...d, [attr.id]: "" }));
+    clearDrafts();
     onPoolChange();
     // Auto-select the value we just created.
     toggleTerm(attr.id, data.id);
@@ -221,36 +329,76 @@ export default function AttributeBuilder({
               </button>
             </div>
 
-            {/* Value (term) chips */}
+            {/* Value (term) chips. Product-owned/pending values get an edit
+                button; global values are read-only here (manage them on the
+                Attributes page — editing there would affect every product). */}
             <div className="flex flex-wrap gap-2 mb-3">
               {attr.terms.map((t) => {
                 const on = assignment.term_ids.includes(t.id);
+                const editable = canEditTerm(t);
                 return (
-                  <button
+                  <span
                     key={t.id}
-                    type="button"
-                    onClick={() => toggleTerm(attr.id, t.id)}
-                    className={`h-8 rounded-full border px-3 text-sm transition ${
+                    className={`inline-flex h-8 items-center rounded-full border text-sm transition ${
                       on
                         ? "border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"
                         : "border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300"
                     }`}
                   >
-                    {attr.display_type === "color" && t.swatch && (
-                      <span
-                        className="inline-block w-3 h-3 mr-1.5 rounded-full align-middle"
-                        style={{ backgroundColor: t.swatch }}
-                      />
+                    <button
+                      type="button"
+                      onClick={() => toggleTerm(attr.id, t.id)}
+                      className={`flex h-full items-center pl-3 ${
+                        editable ? "pr-1.5" : "pr-3"
+                      }`}
+                    >
+                      {attr.display_type === "color" && t.swatch && (
+                        <span
+                          className="inline-block w-3 h-3 mr-1.5 rounded-full align-middle"
+                          style={{ backgroundColor: t.swatch }}
+                        />
+                      )}
+                      {attr.display_type === "image" && t.swatch && (
+                        <img
+                          src={t.swatch}
+                          alt=""
+                          className="inline-block object-cover w-4 h-4 mr-1.5 rounded align-middle"
+                        />
+                      )}
+                      {t.name}
+                    </button>
+                    {editable && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditValue({
+                            termId: t.id,
+                            name: t.name,
+                            swatch: t.swatch ?? "",
+                            type: attr.display_type,
+                            pending: t.id.startsWith("tmp:"),
+                          })
+                        }
+                        aria-label={`Edit ${t.name}`}
+                        title="Edit this value"
+                        className="flex items-center justify-center h-full pr-2.5 pl-0.5 opacity-60 hover:opacity-100"
+                      >
+                        {/* pencil */}
+                        <svg
+                          className="w-3.5 h-3.5"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                        </svg>
+                      </button>
                     )}
-                    {attr.display_type === "image" && t.swatch && (
-                      <img
-                        src={t.swatch}
-                        alt=""
-                        className="inline-block object-cover w-4 h-4 mr-1.5 rounded align-middle"
-                      />
-                    )}
-                    {t.name}
-                  </button>
+                  </span>
                 );
               })}
               {attr.terms.length === 0 && (
@@ -311,9 +459,8 @@ export default function AttributeBuilder({
               </button>
             </div>
             <p className="mb-3 text-theme-xs text-gray-400">
-              {productId
-                ? "Values added here belong to this product only. Manage shared values on the Attributes page."
-                : "Values added here join the shared library for all products."}
+              Values added here belong to this product only. Manage shared
+              values on the Attributes page.
             </p>
 
             {isVariable && (
@@ -403,6 +550,123 @@ export default function AttributeBuilder({
         onPick={(url) => {
           if (pickerAttr) setImageDraft((d) => ({ ...d, [pickerAttr]: url }));
         }}
+      />
+
+      {/* Edit a product-owned (or pending) value — name + color/image. */}
+      <Modal
+        isOpen={editValue !== null}
+        onClose={() => {
+          setEditValue(null);
+          setEditValuePicker(false);
+        }}
+        className="max-w-md w-full p-6"
+      >
+        <h3 className="mb-1 text-lg font-semibold text-gray-800 dark:text-white/90">
+          Edit value
+        </h3>
+        <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
+          This value belongs to this product only. Shared values are edited on
+          the Attributes page.
+        </p>
+        {editValue && (
+          <div className="space-y-5">
+            <div>
+              <Label>Name</Label>
+              <Input
+                value={editValue.name}
+                onChange={(e) =>
+                  setEditValue({ ...editValue, name: e.target.value })
+                }
+              />
+            </div>
+
+            {editValue.type === "color" && (
+              <div>
+                <Label>Colour</Label>
+                <input
+                  type="color"
+                  value={
+                    editValue.swatch.startsWith("#")
+                      ? editValue.swatch
+                      : "#000000"
+                  }
+                  onChange={(e) =>
+                    setEditValue({ ...editValue, swatch: e.target.value })
+                  }
+                  className="w-16 bg-transparent border border-gray-300 rounded-lg cursor-pointer h-11 dark:border-gray-700"
+                />
+              </div>
+            )}
+
+            {editValue.type === "image" && (
+              <div>
+                <Label>Image</Label>
+                <div className="flex items-start gap-3">
+                  <div className="w-16 h-16 overflow-hidden border border-gray-200 rounded-lg shrink-0 bg-gray-50 dark:border-gray-700 dark:bg-white/[0.03]">
+                    {editValue.swatch.trim() ? (
+                      <img
+                        src={editValue.swatch}
+                        alt=""
+                        className="object-cover w-full h-full"
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center w-full h-full text-theme-xs text-gray-400">
+                        None
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex gap-2">
+                      <Input
+                        value={editValue.swatch}
+                        placeholder="Image URL (https://… or /file.jpg)"
+                        onChange={(e) =>
+                          setEditValue({ ...editValue, swatch: e.target.value })
+                        }
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditValuePicker(true)}
+                        className="h-11 shrink-0 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.03]"
+                      >
+                        Choose
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            type="button"
+            onClick={() => {
+              setEditValue(null);
+              setEditValuePicker(false);
+            }}
+            className="h-11 rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.03]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={saveEditValue}
+            disabled={!editValue?.name.trim()}
+            className="h-11 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+          >
+            Save value
+          </button>
+        </div>
+      </Modal>
+
+      {/* Media picker for the value-edit modal's image field. */}
+      <MediaPicker
+        isOpen={editValuePicker}
+        onClose={() => setEditValuePicker(false)}
+        onPick={(url) =>
+          setEditValue((v) => (v ? { ...v, swatch: url } : v))
+        }
       />
     </div>
   );

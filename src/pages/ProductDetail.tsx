@@ -190,9 +190,11 @@ export default function ProductDetail() {
           <h2 className="mb-1 text-2xl font-semibold text-gray-800 dark:text-white/90">
             {product.name}
           </h2>
-          {product.category && (
+          {(product.company || product.brand || product.category) && (
             <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-              {product.category.name}
+              {[product.company?.name, product.brand?.name, product.category?.name]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
           )}
 

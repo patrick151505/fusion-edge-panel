@@ -7,6 +7,10 @@ export type ProductEdit = {
   slug: string;
   sku: string | null;
   category_id: string | null;
+  /** Required at the app level; every product carries a brand. */
+  brand_id: string | null;
+  /** Required at the app level; the brand is filtered by this company. */
+  company_id: string | null;
   short_description: string | null;
   description: string | null;
   /** null for variable products — the trigger maintains their price. */
@@ -70,7 +74,17 @@ export async function updateProduct(
 
 /** Per-field error messages, keyed by form field name. Empty = valid. */
 export type FieldErrors = Partial<
-  Record<"name" | "slug" | "category" | "price" | "sale_price" | "images", string>
+  Record<
+    | "name"
+    | "slug"
+    | "category"
+    | "brand"
+    | "company"
+    | "price"
+    | "sale_price"
+    | "images",
+    string
+  >
 >;
 
 /**
@@ -91,6 +105,16 @@ export function validateFields(input: {
    * omit entirely to skip the check (e.g. a form that allows no category).
    */
   category_id?: string;
+  /**
+   * Selected brand id. Pass a string (even "") to require a brand; omit to
+   * skip the check.
+   */
+  brand_id?: string;
+  /**
+   * Selected company id. Pass a string (even "") to require a company; omit to
+   * skip the check.
+   */
+  company_id?: string;
 }): FieldErrors {
   const errors: FieldErrors = {};
 
@@ -102,6 +126,12 @@ export function validateFields(input: {
 
   if (input.category_id !== undefined && !input.category_id)
     errors.category = "Choose a category.";
+
+  if (input.company_id !== undefined && !input.company_id)
+    errors.company = "Choose a company.";
+
+  if (input.brand_id !== undefined && !input.brand_id)
+    errors.brand = "Choose a brand.";
 
   if (input.kind === "simple" && input.price_cents === null)
     errors.price = "A price is required.";
@@ -185,7 +215,7 @@ export async function duplicateProduct(
   const { data: src, error: readErr } = await supabase
     .from("products")
     .select(
-      `id, name, slug, kind, category_id, short_description, description,
+      `id, name, slug, kind, category_id, brand_id, company_id, short_description, description,
        price_cents, sale_price_cents, in_stock, featured,
        product_images ( url, alt, position, variation_id ),
        product_attributes ( attribute_id, used_for_variations, position,
@@ -215,6 +245,8 @@ export async function duplicateProduct(
       kind: src.kind,
       sku: null,
       category_id: src.category_id,
+      brand_id: src.brand_id,
+      company_id: src.company_id,
       short_description: src.short_description,
       description: src.description,
       price_cents: isVariable ? null : src.price_cents,
@@ -387,6 +419,8 @@ export async function createProduct(
     sku: create.sku,
     kind: create.kind,
     category_id: create.category_id,
+    brand_id: create.brand_id,
+    company_id: create.company_id,
     short_description: create.short_description,
     description: create.description,
     // Variable products leave price null — the trigger fills the range.

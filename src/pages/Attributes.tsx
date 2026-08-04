@@ -41,12 +41,16 @@ export default function Attributes() {
   const [modalOpen, setModalOpen] = useState(false);
   /** Attribute being edited in the modal, or null when adding a new one. */
   const [editingId, setEditingId] = useState<string | null>(null);
-  /** Term being renamed inline: its id and draft values. */
+  /** Term being edited in the modal: its id, draft values, and the parent
+   *  attribute's display type so the modal shows the right controls. */
   const [editTerm, setEditTerm] = useState<{
     id: string;
     name: string;
     swatch: string;
+    type: DisplayType;
   } | null>(null);
+  /** True while the media picker is open FOR the value-edit modal. */
+  const [editTermPicker, setEditTermPicker] = useState(false);
 
   // Per-attribute "add value" drafts.
   const [termDraft, setTermDraft] = useState<Record<string, string>>({});
@@ -112,6 +116,20 @@ export default function Attributes() {
 
   const handleSaveTerm = async () => {
     if (!editTerm || !editTerm.name.trim()) return;
+
+    // Image values must carry a usable URL in the swatch column.
+    if (editTerm.type === "image") {
+      const url = editTerm.swatch.trim();
+      if (!url) {
+        notify("error", "Image required", "Choose or paste an image URL.");
+        return;
+      }
+      if (!/^https?:\/\/|^\//.test(url)) {
+        notify("error", "Bad image URL", "URL must start with http(s):// or /.");
+        return;
+      }
+    }
+
     const { error } = await updateTerm(
       editTerm.id,
       editTerm.name,
@@ -363,9 +381,10 @@ export default function Attributes() {
                           id: t.id,
                           name: t.name,
                           swatch: t.swatch ?? "",
+                          type: attr.display_type,
                         })
                       }
-                      title="Rename this value"
+                      title="Edit this value"
                       className="hover:text-brand-500"
                     >
                       {t.name}
@@ -454,10 +473,22 @@ export default function Attributes() {
         }}
       />
 
+      {/* Media picker for the value-edit modal's image field. */}
+      <MediaPicker
+        isOpen={editTermPicker}
+        onClose={() => setEditTermPicker(false)}
+        onPick={(url) =>
+          setEditTerm((t) => (t ? { ...t, swatch: url } : t))
+        }
+      />
+
       {/* Rename a value (and recolour it, for colour attributes). */}
       <Modal
         isOpen={editTerm !== null}
-        onClose={() => setEditTerm(null)}
+        onClose={() => {
+          setEditTerm(null);
+          setEditTermPicker(false);
+        }}
         className="max-w-md w-full p-6"
       >
         <h3 className="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">
@@ -474,18 +505,60 @@ export default function Attributes() {
                 }
               />
             </div>
-            {/* Only colour/image values carry a swatch payload. */}
-            {editTerm.swatch.startsWith("#") && (
+            {/* Colour values carry a hex; let it be recoloured. */}
+            {editTerm.type === "color" && (
               <div>
                 <Label>Colour</Label>
                 <input
                   type="color"
-                  value={editTerm.swatch}
+                  value={
+                    editTerm.swatch.startsWith("#") ? editTerm.swatch : "#000000"
+                  }
                   onChange={(e) =>
                     setEditTerm({ ...editTerm, swatch: e.target.value })
                   }
                   className="w-16 bg-transparent border border-gray-300 rounded-lg cursor-pointer h-11 dark:border-gray-700"
                 />
+              </div>
+            )}
+
+            {/* Image values carry a URL — pick from the media library or paste. */}
+            {editTerm.type === "image" && (
+              <div>
+                <Label>Image</Label>
+                <div className="flex items-start gap-3">
+                  <div className="w-16 h-16 overflow-hidden border border-gray-200 rounded-lg shrink-0 bg-gray-50 dark:border-gray-700 dark:bg-white/[0.03]">
+                    {editTerm.swatch.trim() ? (
+                      <img
+                        src={editTerm.swatch}
+                        alt=""
+                        className="object-cover w-full h-full"
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center w-full h-full text-theme-xs text-gray-400">
+                        None
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        value={editTerm.swatch}
+                        placeholder="Image URL (https://… or /file.jpg)"
+                        onChange={(e) =>
+                          setEditTerm({ ...editTerm, swatch: e.target.value })
+                        }
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditTermPicker(true)}
+                        className="h-11 shrink-0 rounded-lg border border-gray-300 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.03]"
+                      >
+                        Choose
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
             <p className="text-theme-xs text-gray-400">

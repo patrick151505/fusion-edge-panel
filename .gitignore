@@ -28,6 +28,12 @@ $RECYCLE.BIN/
 # Scratch probe scripts
 __*.mjs
 
+# Supabase migrations — kept local only, not in the repo
+supabase/migrations/
+
+# All SQL — kept local only, not in the repo
+*.sql
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

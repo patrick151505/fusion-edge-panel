@@ -6,12 +6,16 @@ import Label from "../components/form/Label";
 import Input from "../components/form/input/InputField";
 import Button from "../components/ui/button/Button";
 import RichTextEditor from "../components/form/RichTextEditor";
-import AttributeBuilder from "../components/product/AttributeBuilder";
+import AttributeBuilder, {
+  type PendingTerm,
+} from "../components/product/AttributeBuilder";
 import ImagePreview from "../components/product/ImagePreview";
 import MediaPicker from "../components/media/MediaPicker";
 import { useToast } from "../context/ToastContext";
 import { useCategories } from "../hooks/useCategories";
+import { useCompanyBrands } from "../hooks/useCompanyBrands";
 import { useAttributes } from "../hooks/useAttributes";
+import { uploadFileWithProgress } from "../lib/media";
 import { inputToCents } from "../lib/price";
 import {
   createProduct,
@@ -21,10 +25,11 @@ import {
   type ProductCreate,
 } from "../lib/products";
 import {
+  createTerm,
   syncProductAttributes,
   type AttributeAssignment,
 } from "../lib/attributes";
-import type { ProductKind } from "../types/catalogue";
+import type { AttributeWithTerms, ProductKind } from "../types/catalogue";
 
 const shell =
   "rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]";
@@ -33,12 +38,38 @@ const inputClass =
 
 export default function ProductNew() {
   const { categories } = useCategories();
+  const { companies, brandsByCompany } = useCompanyBrands();
   const { attributes, reload: reloadAttributes } = useAttributes();
   const { notify } = useToast();
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState<AttributeAssignment[]>([]);
+  // Values typed on this page before the product exists. Held locally and
+  // written as product-owned (private) values once the product is created —
+  // never into the global pool. See AttributeBuilder's deferred path.
+  const [pendingTerms, setPendingTerms] = useState<PendingTerm[]>([]);
+
+  // The pool the builder sees: the global attributes plus any pending values,
+  // grafted onto their attribute so their chips render and stay selectable.
+  const poolWithPending: AttributeWithTerms[] = attributes.map((a) => {
+    const extra = pendingTerms.filter((t) => t.attribute_id === a.id);
+    if (extra.length === 0) return a;
+    return {
+      ...a,
+      terms: [
+        ...a.terms,
+        ...extra.map((t, i) => ({
+          id: t.tempId,
+          name: t.name,
+          slug: t.name,
+          swatch: t.swatch,
+          position: a.terms.length + i,
+        })),
+      ],
+    };
+  });
   // Which image row the media picker is filling, or null when closed.
   const [pickerRow, setPickerRow] = useState<number | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const [kind, setKind] = useState<ProductKind>("simple");
   const [name, setName] = useState("");
@@ -46,6 +77,10 @@ export default function ProductNew() {
   const [slugEdited, setSlugEdited] = useState(false);
   const [sku, setSku] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [companyId, setCompanyId] = useState("");
+  const [brandId, setBrandId] = useState("");
+  // Brands available for the chosen company (the picker filters by company).
+  const companyBrands = companyId ? brandsByCompany.get(companyId) ?? [] : [];
   const [shortDesc, setShortDesc] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
@@ -69,6 +104,8 @@ export default function ProductNew() {
     salePrice: string;
     images: string[];
     categoryId: string;
+    companyId: string;
+    brandId: string;
   }>) => {
     if (!submitted) return;
     const p = inputToCents(over.price ?? price);
@@ -84,6 +121,8 @@ export default function ProductNew() {
         sale_price_cents: variable ? null : Number.isNaN(s) ? null : s,
         image_urls: (over.images ?? images).map((u) => u.trim()).filter(Boolean),
         category_id: over.categoryId ?? categoryId,
+        company_id: over.companyId ?? companyId,
+        brand_id: over.brandId ?? brandId,
       })
     );
   };
@@ -99,6 +138,40 @@ export default function ProductNew() {
   const setImageAt = (i: number, v: string) =>
     setImages((list) => list.map((u, idx) => (idx === i ? v : u)));
   const addImage = () => setImages((list) => [...list, ""]);
+  /** Move image at index `from` to `to`, reindexing the rest (drag reorder).
+   *  Reordering can't change validity (same URLs), so no revalidate needed. */
+  const reorderImage = (from: number, to: number) =>
+    setImages((list) => {
+      const next = [...list];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  /** Upload image files dropped on the preview, then add their URLs. */
+  const handleDropFiles = async (files: File[]) => {
+    const urls: string[] = [];
+    for (const file of files) {
+      setUploadProgress(0);
+      const { url, error } = await uploadFileWithProgress(file, setUploadProgress);
+      if (error) notify("error", `Upload failed: ${file.name}`, error);
+      else if (url) urls.push(url);
+    }
+    setUploadProgress(null);
+    if (urls.length === 0) return;
+
+    setImages((list) => {
+      // Reuse any blank slots first, then append the rest.
+      const next = [...list];
+      let u = 0;
+      for (let i = 0; i < next.length && u < urls.length; i++) {
+        if (next[i].trim() === "") next[i] = urls[u++];
+      }
+      while (u < urls.length) next.push(urls[u++]);
+      revalidate({ images: next });
+      return next;
+    });
+    notify("success", "Image added", `${urls.length} uploaded.`);
+  };
   /**
    * Remove from the preview. Unlike the row's Remove button this also clears
    * the last remaining row rather than leaving its URL in place, and keeps
@@ -144,6 +217,8 @@ export default function ProductNew() {
       sale_price_cents: effectiveSale,
       image_urls: imageUrls,
       category_id: categoryId,
+      company_id: companyId,
+      brand_id: brandId,
     });
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
@@ -168,6 +243,8 @@ export default function ProductNew() {
       slug: slug.trim(),
       sku: sku.trim() || null,
       category_id: categoryId || null,
+      brand_id: brandId || null,
+      company_id: companyId || null,
       short_description: shortDesc.trim() || null,
       description: descEmpty ? null : descHtml,
       price_cents: effectivePrice,
@@ -188,12 +265,40 @@ export default function ProductNew() {
       return;
     }
 
-    // Product row is in; now attach its attribute assignments.
+    // Product row is in. Now persist any values that were typed before the
+    // product existed — as product-owned (private) values, not global — and
+    // map their temporary ids to the real ones.
+    const tempToReal = new Map<string, string>();
+    for (const t of pendingTerms) {
+      const { data, error: termErr } = await createTerm(
+        t.attribute_id,
+        t.name,
+        t.swatch,
+        id
+      );
+      if (termErr || !data) {
+        setSaving(false);
+        notify("error", "Product saved, values failed", termErr ?? "Failed.");
+        navigate(`/product/${newSlug}`);
+        return;
+      }
+      tempToReal.set(t.tempId, data.id);
+    }
+
+    // Swap any temp ids in the assignments (selected terms + default) for the
+    // now-real ids before writing the attribute links.
+    const resolveId = (tid: string) => tempToReal.get(tid) ?? tid;
+    const resolved = assignments.map((a) => ({
+      ...a,
+      term_ids: a.term_ids.map(resolveId),
+      default_term_id: a.default_term_id ? resolveId(a.default_term_id) : a.default_term_id,
+    }));
+
     // A simple product can never carry variation attributes — force specs.
     const safeAssignments =
       kind === "variable"
-        ? assignments
-        : assignments.map((a) => ({ ...a, used_for_variations: false }));
+        ? resolved
+        : resolved.map((a) => ({ ...a, used_for_variations: false }));
 
     if (safeAssignments.length > 0) {
       const { error: attrErr } = await syncProductAttributes(
@@ -307,34 +412,109 @@ export default function ProductNew() {
               <Input value={sku} onChange={(e) => setSku(e.target.value)} />
             </div>
           </div>
-          <div>
-            <Label>
-              Category <span className="text-error-500">*</span>
-            </Label>
-            <select
-              value={categoryId}
-              onChange={(e) => {
-                setCategoryId(e.target.value);
-                revalidate({ categoryId: e.target.value });
-              }}
-              className={`${inputClass} dark:bg-gray-900 ${
-                fieldErrors.category
-                  ? "border-error-500 focus:border-error-300 focus:ring-error-500/20"
-                  : ""
-              }`}
-            >
-              <option value="">Select a category…</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div>
+              <Label>
+                Category <span className="text-error-500">*</span>
+              </Label>
+              <select
+                value={categoryId}
+                onChange={(e) => {
+                  setCategoryId(e.target.value);
+                  revalidate({ categoryId: e.target.value });
+                }}
+                className={`${inputClass} dark:bg-gray-900 ${
+                  fieldErrors.category
+                    ? "border-error-500 focus:border-error-300 focus:ring-error-500/20"
+                    : ""
+                }`}
+              >
+                <option value="">Select a category…</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.category && (
+                <p className="mt-1.5 text-xs text-error-500">
+                  {fieldErrors.category}
+                </p>
+              )}
+            </div>
+            <div>
+              <Label>
+                Company <span className="text-error-500">*</span>
+              </Label>
+              <select
+                value={companyId}
+                onChange={(e) => {
+                  const cid = e.target.value;
+                  setCompanyId(cid);
+                  // Company drives the brand list, so a company change clears a
+                  // brand that no longer belongs to the new company.
+                  const allowed = cid ? brandsByCompany.get(cid) ?? [] : [];
+                  const keepBrand = allowed.some((b) => b.id === brandId)
+                    ? brandId
+                    : "";
+                  setBrandId(keepBrand);
+                  revalidate({ companyId: cid, brandId: keepBrand });
+                }}
+                className={`${inputClass} dark:bg-gray-900 ${
+                  fieldErrors.company
+                    ? "border-error-500 focus:border-error-300 focus:ring-error-500/20"
+                    : ""
+                }`}
+              >
+                <option value="">Select a company…</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.company && (
+                <p className="mt-1.5 text-xs text-error-500">
+                  {fieldErrors.company}
+                </p>
+              )}
+            </div>
+            <div>
+              <Label>
+                Brand <span className="text-error-500">*</span>
+              </Label>
+              <select
+                value={brandId}
+                disabled={!companyId}
+                onChange={(e) => {
+                  setBrandId(e.target.value);
+                  revalidate({ brandId: e.target.value });
+                }}
+                className={`${inputClass} dark:bg-gray-900 disabled:opacity-50 ${
+                  fieldErrors.brand
+                    ? "border-error-500 focus:border-error-300 focus:ring-error-500/20"
+                    : ""
+                }`}
+              >
+                <option value="">
+                  {companyId
+                    ? companyBrands.length
+                      ? "Select a brand…"
+                      : "No brands in this company"
+                    : "Pick a company first"}
                 </option>
-              ))}
-            </select>
-            {fieldErrors.category && (
-              <p className="mt-1.5 text-xs text-error-500">
-                {fieldErrors.category}
-              </p>
-            )}
+                {companyBrands.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.brand && (
+                <p className="mt-1.5 text-xs text-error-500">
+                  {fieldErrors.brand}
+                </p>
+              )}
+            </div>
           </div>
           <div>
             <Label>Short description</Label>
@@ -355,12 +535,20 @@ export default function ProductNew() {
         {/* Attributes get their own card, separate from the product details. */}
         <div className={shell}>
           <AttributeBuilder
-            pool={attributes}
+            pool={poolWithPending}
             value={assignments}
             onChange={setAssignments}
             onPoolChange={reloadAttributes}
             notify={notify}
             isVariable={kind === "variable"}
+            onPendingTerm={(t) => setPendingTerms((list) => [...list, t])}
+            onEditPendingTerm={(tempId, patch) =>
+              setPendingTerms((list) =>
+                list.map((t) =>
+                  t.tempId === tempId ? { ...t, ...patch } : t
+                )
+              )
+            }
           />
           {kind === "variable" && (
             <p className="pt-4 mt-4 text-theme-xs text-gray-400 border-t border-gray-100 dark:border-gray-800">
@@ -385,6 +573,9 @@ export default function ProductNew() {
               onAdd={addImage}
               onRemove={removeImageFromPreview}
               onChoose={setPickerRow}
+              onReorder={reorderImage}
+              onDropFiles={handleDropFiles}
+              uploadProgress={uploadProgress}
             />
             <MediaPicker
               isOpen={pickerRow !== null}

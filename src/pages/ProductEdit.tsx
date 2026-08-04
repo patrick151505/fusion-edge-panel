@@ -20,6 +20,7 @@ import { useProduct } from "../hooks/useProduct";
 import { useAttributes } from "../hooks/useAttributes";
 import { useToast } from "../context/ToastContext";
 import { centsToInput, inputToCents } from "../lib/price";
+import { uploadFileWithProgress } from "../lib/media";
 import {
   syncProductImages,
   updateProduct,
@@ -28,6 +29,7 @@ import {
   type ProductEdit,
 } from "../lib/products";
 import { useCategories } from "../hooks/useCategories";
+import { useCompanyBrands } from "../hooks/useCompanyBrands";
 import MediaPicker from "../components/media/MediaPicker";
 import {
   syncProductAttributes,
@@ -42,6 +44,8 @@ type FormState = {
   slug: string;
   sku: string;
   category_id: string;
+  brand_id: string;
+  company_id: string;
   short_description: string;
   description: string;
   price: string;
@@ -60,6 +64,7 @@ export default function ProductEditPage() {
   // Scope the attribute pool to this product: globals + its own private values.
   const { attributes, reload: reloadAttributes } = useAttributes(product?.id);
   const { categories } = useCategories();
+  const { companies, brandsByCompany } = useCompanyBrands();
   const { notify } = useToast();
   const navigate = useNavigate();
 
@@ -72,6 +77,7 @@ export default function ProductEditPage() {
   );
   // Which image row the media picker is filling, or null when closed.
   const [pickerRow, setPickerRow] = useState<number | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -85,6 +91,8 @@ export default function ProductEditPage() {
       slug: product.slug,
       sku: product.sku ?? "",
       category_id: product.category?.id ?? "",
+      brand_id: product.brand?.id ?? "",
+      company_id: product.company?.id ?? "",
       short_description: product.short_description ?? "",
       description: product.description ?? "",
       price: centsToInput(product.price_cents),
@@ -158,6 +166,11 @@ export default function ProductEditPage() {
 
   const isVariable = product.kind === "variable";
 
+  // Brands available for the chosen company (the Brand picker filters by it).
+  const companyBrands = form.company_id
+    ? brandsByCompany.get(form.company_id) ?? []
+    : [];
+
   /**
    * The variation-forming attributes, narrowed to the terms this product
    * actually offers — that subset is what the combinations are built from.
@@ -196,6 +209,8 @@ export default function ProductEditPage() {
           price_cents: isVariable ? null : Number.isNaN(p) ? null : p,
           sale_price_cents: isVariable ? null : Number.isNaN(s) ? null : s,
           category_id: next.category_id,
+          company_id: next.company_id,
+          brand_id: next.brand_id,
           image_urls: images.map((u) => u.trim()).filter(Boolean),
         })
       );
@@ -212,6 +227,38 @@ export default function ProductEditPage() {
         ? list.filter((_, idx) => idx !== i)
         : list.map((u, idx) => (idx === i ? "" : u))
     );
+  /** Move image at index `from` to `to`, reindexing the rest (drag reorder). */
+  const reorderImage = (from: number, to: number) =>
+    setImages((list) => {
+      const next = [...list];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  /** Upload image files dropped on the preview, then add their URLs. */
+  const handleDropFiles = async (files: File[]) => {
+    const urls: string[] = [];
+    for (const file of files) {
+      setUploadProgress(0);
+      const { url, error } = await uploadFileWithProgress(file, setUploadProgress);
+      if (error) notify("error", `Upload failed: ${file.name}`, error);
+      else if (url) urls.push(url);
+    }
+    setUploadProgress(null);
+    if (urls.length === 0) return;
+
+    setImages((list) => {
+      // Reuse any blank slots first, then append the rest.
+      const next = [...list];
+      let u = 0;
+      for (let i = 0; i < next.length && u < urls.length; i++) {
+        if (next[i].trim() === "") next[i] = urls[u++];
+      }
+      while (u < urls.length) next.push(urls[u++]);
+      return next;
+    });
+    notify("success", "Image added", `${urls.length} uploaded.`);
+  };
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -236,6 +283,8 @@ export default function ProductEditPage() {
       price_cents: isVariable ? null : price,
       sale_price_cents: isVariable ? null : salePrice,
       category_id: form.category_id,
+      company_id: form.company_id,
+      brand_id: form.brand_id,
       image_urls: imageUrls,
     });
     setFieldErrors(errors);
@@ -276,6 +325,8 @@ export default function ProductEditPage() {
       slug: form.slug.trim(),
       sku: form.sku.trim() || null,
       category_id: form.category_id || null,
+      brand_id: form.brand_id || null,
+      company_id: form.company_id || null,
       short_description: form.short_description.trim() || null,
       description: descEmpty ? null : descHtml,
       // Never write price columns for a variable product — the trigger owns them.
@@ -395,31 +446,102 @@ export default function ProductEditPage() {
               <Input value={form.sku} onChange={(e) => set("sku", e.target.value)} />
             </div>
           </div>
-          <div>
-            <Label>
-              Category <span className="text-error-500">*</span>
-            </Label>
-            <select
-              value={form.category_id}
-              onChange={(e) => set("category_id", e.target.value)}
-              className={`${inputClass} dark:bg-gray-900 ${
-                fieldErrors.category
-                  ? "border-error-500 focus:border-error-300 focus:ring-error-500/20"
-                  : ""
-              }`}
-            >
-              <option value="">Select a category…</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div>
+              <Label>
+                Category <span className="text-error-500">*</span>
+              </Label>
+              <select
+                value={form.category_id}
+                onChange={(e) => set("category_id", e.target.value)}
+                className={`${inputClass} dark:bg-gray-900 ${
+                  fieldErrors.category
+                    ? "border-error-500 focus:border-error-300 focus:ring-error-500/20"
+                    : ""
+                }`}
+              >
+                <option value="">Select a category…</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.category && (
+                <p className="mt-1.5 text-xs text-error-500">
+                  {fieldErrors.category}
+                </p>
+              )}
+            </div>
+            <div>
+              <Label>
+                Company <span className="text-error-500">*</span>
+              </Label>
+              <select
+                value={form.company_id}
+                onChange={(e) => {
+                  const cid = e.target.value;
+                  const allowed = cid ? brandsByCompany.get(cid) ?? [] : [];
+                  const keepBrand = allowed.some((b) => b.id === form.brand_id)
+                    ? form.brand_id
+                    : "";
+                  // Update both in one pass so the brand can't dangle.
+                  setForm((f) =>
+                    f ? { ...f, company_id: cid, brand_id: keepBrand } : f
+                  );
+                }}
+                className={`${inputClass} dark:bg-gray-900 ${
+                  fieldErrors.company
+                    ? "border-error-500 focus:border-error-300 focus:ring-error-500/20"
+                    : ""
+                }`}
+              >
+                <option value="">Select a company…</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.company && (
+                <p className="mt-1.5 text-xs text-error-500">
+                  {fieldErrors.company}
+                </p>
+              )}
+            </div>
+            <div>
+              <Label>
+                Brand <span className="text-error-500">*</span>
+              </Label>
+              <select
+                value={form.brand_id}
+                disabled={!form.company_id}
+                onChange={(e) => set("brand_id", e.target.value)}
+                className={`${inputClass} dark:bg-gray-900 disabled:opacity-50 ${
+                  fieldErrors.brand
+                    ? "border-error-500 focus:border-error-300 focus:ring-error-500/20"
+                    : ""
+                }`}
+              >
+                <option value="">
+                  {form.company_id
+                    ? companyBrands.length
+                      ? "Select a brand…"
+                      : "No brands in this company"
+                    : "Pick a company first"}
                 </option>
-              ))}
-            </select>
-            {fieldErrors.category && (
-              <p className="mt-1.5 text-xs text-error-500">
-                {fieldErrors.category}
-              </p>
-            )}
+                {companyBrands.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.brand && (
+                <p className="mt-1.5 text-xs text-error-500">
+                  {fieldErrors.brand}
+                </p>
+              )}
+            </div>
           </div>
           <div>
             <Label>Short description</Label>
@@ -491,6 +613,9 @@ export default function ProductEditPage() {
               onAdd={addImage}
               onRemove={removeImageFromPreview}
               onChoose={setPickerRow}
+              onReorder={reorderImage}
+              onDropFiles={handleDropFiles}
+              uploadProgress={uploadProgress}
             />
             <MediaPicker
               isOpen={pickerRow !== null}

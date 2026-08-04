@@ -22,6 +22,9 @@ import ProductNew from "./pages/ProductNew";
 import Media from "./pages/Media";
 import Attributes from "./pages/Attributes";
 import Categories from "./pages/Categories";
+import Brands from "./pages/Brands";
+import Companies from "./pages/Companies";
+import Users from "./pages/Users";
 import RequireAdmin from "./components/auth/RequireAdmin";
 import RequireAuth from "./components/auth/RequireAuth";
 import AppLayout from "./layout/AppLayout";
@@ -47,8 +50,11 @@ export default function App() {
               <Route path="/product/new" element={<ProductNew />} />
               <Route path="/product/attributes" element={<Attributes />} />
               <Route path="/product/categories" element={<Categories />} />
+              <Route path="/product/brands" element={<Brands />} />
+              <Route path="/product/companies" element={<Companies />} />
               <Route path="/product/:slug/edit" element={<ProductEdit />} />
               <Route path="/media" element={<Media />} />
+              <Route path="/users" element={<Users />} />
             </Route>
 
             <Route path="/product/:slug" element={<ProductDetail />} />

@@ -1,6 +1,66 @@
-import { supabase } from "./supabase";
+import { supabase, SUPABASE_ANON_KEY, SUPABASE_URL } from "./supabase";
 
 export const MEDIA_BUCKET = "media";
+
+/** Hard ceiling — files bigger than this are rejected outright. */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+/** Above this, we compress/resize before upload to keep storage lean. */
+export const OPTIMIZE_OVER_BYTES = 5 * 1024 * 1024; // 5 MB
+/** Longest edge (px) an optimized image is scaled down to. */
+const MAX_DIMENSION = 2000;
+
+/**
+ * Shrink a large image with a canvas: cap the longest edge and re-encode as
+ * JPEG. Returns a new File; falls back to the original if anything fails
+ * (e.g. the browser can't decode it) so an upload is never blocked by this.
+ */
+async function optimizeImage(file: File): Promise<File> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+
+    const blob = await new Promise<Blob | null>((res) =>
+      canvas.toBlob(res, "image/jpeg", 0.82)
+    );
+    // Only use the optimized version if it actually came out smaller.
+    if (!blob || blob.size >= file.size) return file;
+
+    const name = file.name.replace(/\.\w+$/, "") + ".jpg";
+    return new File([blob], name, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
+/**
+ * Validate an image against the size limit and optimize it when large.
+ * Returns the (possibly smaller) file to upload, or an error string.
+ */
+export async function prepareImage(
+  file: File
+): Promise<{ file: File | null; error: string | null }> {
+  if (!file.type.startsWith("image/")) {
+    return { file: null, error: "Only image files are allowed." };
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    const mb = (file.size / 1024 / 1024).toFixed(1);
+    return { file: null, error: `Image is ${mb} MB. The limit is 10 MB.` };
+  }
+  if (file.size > OPTIMIZE_OVER_BYTES) {
+    return { file: await optimizeImage(file), error: null };
+  }
+  return { file, error: null };
+}
 
 export type MediaFile = {
   name: string;
@@ -35,16 +95,79 @@ function safeName(original: string): string {
 export async function uploadFile(
   file: File
 ): Promise<{ url: string | null; error: string | null }> {
-  if (!file.type.startsWith("image/")) {
-    return { url: null, error: "Only image files are allowed." };
-  }
-  const path = safeName(file.name);
-  const { error } = await storage().upload(path, file, {
+  const prepared = await prepareImage(file);
+  if (prepared.error || !prepared.file)
+    return { url: null, error: prepared.error };
+  const ready = prepared.file;
+
+  const path = safeName(ready.name);
+  const { error } = await storage().upload(path, ready, {
     cacheControl: "3600",
-    contentType: file.type,
+    contentType: ready.type,
   });
   if (error) return { url: null, error: error.message };
   return { url: publicUrl(path), error: null };
+}
+
+/**
+ * Upload with real progress.
+ *
+ * The Supabase JS client's upload() gives no progress events, so we POST the
+ * file straight to the Storage REST endpoint via XHR and read its
+ * upload.onprogress. Auth is the signed-in user's token (uploads are
+ * admin-gated), so this must run while logged in.
+ */
+export async function uploadFileWithProgress(
+  file: File,
+  onProgress: (percent: number) => void
+): Promise<{ url: string | null; error: string | null }> {
+  const prepared = await prepareImage(file);
+  if (prepared.error || !prepared.file)
+    return { url: null, error: prepared.error };
+  const ready = prepared.file;
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token ?? SUPABASE_ANON_KEY;
+
+  const path = safeName(ready.name);
+  const endpoint = `${SUPABASE_URL}/storage/v1/object/${MEDIA_BUCKET}/${path}`;
+
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", endpoint);
+    xhr.setRequestHeader("authorization", `Bearer ${token}`);
+    xhr.setRequestHeader("apikey", SUPABASE_ANON_KEY);
+    xhr.setRequestHeader("x-upsert", "false");
+    xhr.setRequestHeader("cache-control", "3600");
+    xhr.setRequestHeader("content-type", ready.type);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(100);
+        resolve({ url: publicUrl(path), error: null });
+      } else {
+        let message = `Upload failed (${xhr.status}).`;
+        try {
+          message = JSON.parse(xhr.responseText).message ?? message;
+        } catch {
+          /* keep the default */
+        }
+        resolve({ url: null, error: message });
+      }
+    };
+    xhr.onerror = () =>
+      resolve({ url: null, error: "Network error during upload." });
+
+    xhr.send(ready);
+  });
 }
 
 /**

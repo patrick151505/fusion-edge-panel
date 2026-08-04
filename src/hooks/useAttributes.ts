@@ -20,12 +20,12 @@ export function useAttributes(productId?: string) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    // Filter the nested terms: globals, plus this product's own if given.
+    // Preferred query: needs attribute_terms.product_id (its migration).
     const termFilter = productId
       ? `product_id.is.null,product_id.eq.${productId}`
       : `product_id.is.null`;
 
-    const { data } = await supabase
+    const preferred = await supabase
       .from("attributes")
       .select(
         `
@@ -36,10 +36,26 @@ export function useAttributes(productId?: string) {
       .or(termFilter, { referencedTable: "attribute_terms" })
       .order("position");
 
-    const rows = (data ?? []).map((a) => ({
+    // Fall back gracefully until add_product_owned_terms.sql has been run:
+    // load every term (the old behaviour) rather than blanking the page.
+    let data: unknown = preferred.data;
+    if (preferred.error) {
+      const fallback = await supabase
+        .from("attributes")
+        .select(
+          `
+          id, name, slug, display_type, position,
+          terms:attribute_terms ( id, name, slug, swatch, position )
+        `
+        )
+        .order("position");
+      data = fallback.data;
+    }
+
+    const rows = ((data as AttributeWithTerms[] | null) ?? []).map((a) => ({
       ...a,
-      terms: [...((a as AttributeWithTerms).terms ?? [])].sort(byPos),
-    })) as AttributeWithTerms[];
+      terms: [...(a.terms ?? [])].sort(byPos),
+    }));
 
     setAttributes(rows.sort(byPos));
     setLoading(false);
