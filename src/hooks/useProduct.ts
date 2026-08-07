@@ -9,10 +9,11 @@ const BRAND_SELECT = `
   brand:brands ( id, name, slug ),
   company:companies ( id, name, slug ),`;
 
-const buildSelect = (withBrand: boolean) => `
+const buildSelect = (withBrand: boolean, withModel: boolean) => `
   id, name, slug, sku, kind, description, short_description,
   price_cents, sale_price_cents, price_max_cents,
   in_stock, featured, published, created_at,
+  ${withModel ? "model_3d_url," : ""}
   category:categories ( id, name, slug ),
   ${withBrand ? BRAND_SELECT : ""}
   images:product_images ( id, url, alt, position, variation_id ),
@@ -73,21 +74,28 @@ export function useProduct(slug: string | undefined) {
     setLoading(true);
     setError(null);
 
-    // Prefer the brand-aware query; fall back to a brand-free one until the
-    // 0005_brands migration has been run (otherwise the join errors out and
-    // the whole product page fails to load).
-    let { data, error } = await supabase
-      .from("products")
-      .select(buildSelect(true))
-      .eq("slug", slug)
-      .maybeSingle();
-
-    if (error && /brand|compan/i.test(error.message)) {
-      ({ data, error } = await supabase
+    // Prefer the full query; progressively drop the brand/company relations
+    // (need 0005/0007) and the model_3d_url column (needs 0008) until it works,
+    // so a not-yet-run migration never breaks the whole product page.
+    const attempts: [boolean, boolean][] = [
+      [true, true],
+      [true, false],
+      [false, true],
+      [false, false],
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let data: any = null;
+    let error: { message: string } | null = null;
+    for (const [withBrand, withModel] of attempts) {
+      const res = await supabase
         .from("products")
-        .select(buildSelect(false))
+        .select(buildSelect(withBrand, withModel))
         .eq("slug", slug)
-        .maybeSingle());
+        .maybeSingle();
+      data = res.data;
+      error = res.error;
+      // Stop once it succeeds, or on an error that isn't about these columns.
+      if (!error || !/brand|compan|model_3d/i.test(error.message)) break;
     }
 
     if (error) {

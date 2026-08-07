@@ -7,6 +7,7 @@ import Input from "../components/form/input/InputField";
 import RichTextEditor from "../components/form/RichTextEditor";
 import AttributeBuilder from "../components/product/AttributeBuilder";
 import ImagePreview from "../components/product/ImagePreview";
+import Model3DField from "../components/product/Model3DField";
 import VariationBuilder from "../components/product/VariationBuilder";
 import Tabs from "../components/common/Tabs";
 import {
@@ -46,6 +47,7 @@ type FormState = {
   category_id: string;
   brand_id: string;
   company_id: string;
+  model_3d_url: string;
   short_description: string;
   description: string;
   price: string;
@@ -93,6 +95,7 @@ export default function ProductEditPage() {
       category_id: product.category?.id ?? "",
       brand_id: product.brand?.id ?? "",
       company_id: product.company?.id ?? "",
+      model_3d_url: product.model_3d_url ?? "",
       short_description: product.short_description ?? "",
       description: product.description ?? "",
       price: centsToInput(product.price_cents),
@@ -327,6 +330,7 @@ export default function ProductEditPage() {
       category_id: form.category_id || null,
       brand_id: form.brand_id || null,
       company_id: form.company_id || null,
+      model_3d_url: form.model_3d_url.trim() || null,
       short_description: form.short_description.trim() || null,
       description: descEmpty ? null : descHtml,
       // Never write price columns for a variable product — the trigger owns them.
@@ -627,6 +631,14 @@ export default function ProductEditPage() {
             <p className="mt-2 text-theme-xs text-gray-400">
               Variation images aren’t shown here.
             </p>
+          </div>
+
+          <div className={shell}>
+            <Model3DField
+              value={form.model_3d_url}
+              onChange={(v) => set("model_3d_url", v)}
+              notify={notify}
+            />
           </div>
 
           <div className={`${shell} space-y-5`}>

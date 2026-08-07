@@ -11,6 +11,8 @@ export type ProductEdit = {
   brand_id: string | null;
   /** Required at the app level; the brand is filtered by this company. */
   company_id: string | null;
+  /** Optional URL to a glTF/GLB 3D model. */
+  model_3d_url: string | null;
   short_description: string | null;
   description: string | null;
   /** null for variable products — the trigger maintains their price. */
@@ -215,7 +217,8 @@ export async function duplicateProduct(
   const { data: src, error: readErr } = await supabase
     .from("products")
     .select(
-      `id, name, slug, kind, category_id, brand_id, company_id, short_description, description,
+      `id, name, slug, kind, category_id, brand_id, company_id, model_3d_url,
+       short_description, description,
        price_cents, sale_price_cents, in_stock, featured,
        product_images ( url, alt, position, variation_id ),
        product_attributes ( attribute_id, used_for_variations, position,
@@ -247,6 +250,7 @@ export async function duplicateProduct(
       category_id: src.category_id,
       brand_id: src.brand_id,
       company_id: src.company_id,
+      model_3d_url: src.model_3d_url,
       short_description: src.short_description,
       description: src.description,
       price_cents: isVariable ? null : src.price_cents,
@@ -421,6 +425,7 @@ export async function createProduct(
     category_id: create.category_id,
     brand_id: create.brand_id,
     company_id: create.company_id,
+    model_3d_url: create.model_3d_url,
     short_description: create.short_description,
     description: create.description,
     // Variable products leave price null — the trigger fills the range.

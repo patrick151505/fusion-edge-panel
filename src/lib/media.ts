@@ -109,6 +109,36 @@ export async function uploadFile(
   return { url: publicUrl(path), error: null };
 }
 
+/** Largest 3D model we accept (models are not optimized, just size-capped). */
+export const MAX_MODEL_BYTES = 30 * 1024 * 1024; // 30 MB
+
+/**
+ * Upload a glTF/GLB 3D model. Unlike images these aren't re-encoded — a .glb is
+ * already a packed binary — so we only validate the extension and size.
+ */
+export async function uploadModel3D(
+  file: File
+): Promise<{ url: string | null; error: string | null }> {
+  if (!/\.(glb|gltf)$/i.test(file.name)) {
+    return { url: null, error: "Use a .glb or .gltf file." };
+  }
+  if (file.size > MAX_MODEL_BYTES) {
+    const mb = (file.size / 1024 / 1024).toFixed(1);
+    return { url: null, error: `Model is ${mb} MB. The limit is 30 MB.` };
+  }
+
+  const path = safeName(file.name);
+  const contentType = /\.glb$/i.test(file.name)
+    ? "model/gltf-binary"
+    : "model/gltf+json";
+  const { error } = await storage().upload(path, file, {
+    cacheControl: "3600",
+    contentType,
+  });
+  if (error) return { url: null, error: error.message };
+  return { url: publicUrl(path), error: null };
+}
+
 /**
  * Upload with real progress.
  *

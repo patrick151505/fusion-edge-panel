@@ -272,13 +272,31 @@ const AppSidebar: React.FC = () => {
         }`}
       >
         <Link to="/">
-          <img
-            className="dark:brightness-0 dark:invert"
-            src="/logo.png"
-            alt="FusionEdge"
-            width={isExpanded || isHovered || isMobileOpen ? 180 : 50}
-            height={isExpanded || isHovered || isMobileOpen ? 33 : 11}
-          />
+          {(() => {
+            const open = isExpanded || isHovered || isMobileOpen;
+            const w = open ? 180 : 50;
+            const h = open ? 33 : 11;
+            return (
+              <>
+                {/* Light logo — hidden in dark mode */}
+                <img
+                  className="dark:hidden"
+                  src="/logo.png"
+                  alt="FusionEdge"
+                  width={w}
+                  height={h}
+                />
+                {/* Dark logo — shown only in dark mode */}
+                <img
+                  className="hidden dark:block"
+                  src="/log-fusion-dark.png"
+                  alt="FusionEdge"
+                  width={w}
+                  height={h}
+                />
+              </>
+            );
+          })()}
         </Link>
       </div>
       <div className="flex flex-col overflow-y-auto duration-300 ease-linear no-scrollbar">

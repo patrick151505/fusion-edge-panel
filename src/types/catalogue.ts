@@ -127,6 +127,8 @@ export type Product = {
   featured: boolean;
   published: boolean;
   created_at: string;
+  /** Optional URL to a glTF/GLB 3D model. */
+  model_3d_url: string | null;
   category: Category | null;
   brand: Brand | null;
   company: Company | null;

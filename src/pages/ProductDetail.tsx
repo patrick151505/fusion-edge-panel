@@ -5,6 +5,7 @@ import PageMeta from "../components/common/PageMeta";
 import Badge from "../components/ui/badge/Badge";
 import AttributePicker from "../components/product/AttributePicker";
 import ProductGallery from "../components/product/ProductGallery";
+import Model3DViewer from "../components/product/Model3DViewer";
 import RichText from "../components/common/RichText";
 import { useProduct } from "../hooks/useProduct";
 import { useAuth } from "../context/AuthContext";
@@ -162,11 +163,22 @@ export default function ProductDetail() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className={shell}>
-          <ProductGallery
-            product={product}
-            variationId={variation?.id ?? null}
-          />
+        <div className="space-y-6">
+          <div className={shell}>
+            <ProductGallery
+              product={product}
+              variationId={variation?.id ?? null}
+            />
+          </div>
+
+          {product.model_3d_url && (
+            <div className={shell}>
+              <h3 className="mb-3 text-sm font-medium text-gray-800 dark:text-white/90">
+                3D model
+              </h3>
+              <Model3DViewer src={product.model_3d_url} />
+            </div>
+          )}
         </div>
 
         <div className={shell}>

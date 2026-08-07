@@ -116,6 +116,23 @@ Work completed today, grouped for ClickUp. Each item notes whether it needs a
   `src/lib/products.ts`, `src/types/catalogue.ts`
 - ⚠️ **Action required:** run `0007_brand_companies.sql`.
 
+## 10. 3D model on products
+- Product Add/Edit forms get a **3D model** section: paste a `.glb`/`.gltf` URL
+  **or upload** one (stored in Supabase Storage, 30 MB cap), with a live
+  interactive preview (orbit + zoom + auto-rotate).
+- The public product page shows an interactive **3D viewer** when a model is set.
+- Uses `@google/model-viewer` (installed via npm, self-contained — no CDN).
+- New `products.model_3d_url` column (optional). `useProduct` degrades
+  gracefully if 0008 hasn't run.
+- Files: `supabase/migrations/0008_product_model3d.sql`,
+  `src/components/product/Model3DViewer.tsx`,
+  `src/components/product/Model3DField.tsx`, `src/lib/media.ts`
+  (`uploadModel3D`), `src/lib/products.ts`, `src/hooks/useProduct.ts`,
+  `src/types/catalogue.ts`, `src/pages/ProductNew.tsx`,
+  `src/pages/ProductEdit.tsx`, `src/pages/ProductDetail.tsx`; added dep
+  `@google/model-viewer`.
+- ⚠️ **Action required:** run `0008_product_model3d.sql`.
+
 ---
 
 ## Outstanding action items (checklist)
@@ -124,6 +141,7 @@ Work completed today, grouped for ClickUp. Each item notes whether it needs a
 - [ ] Run migration `0005_brands.sql` (adds brands + backfills existing products to "Generic")
 - [ ] Run migration `0006_companies.sql` (adds companies + optional brand→company link)
 - [ ] Run migration `0007_brand_companies.sql` (company⇄brand many-to-many + company on products, backfills "Generic")
+- [ ] Run migration `0008_product_model3d.sql` (adds products.model_3d_url for the 3D viewer)
 - [ ] Deploy Edge Function: `supabase functions deploy admin-users` + set `SERVICE_ROLE_KEY`
 - [ ] Run `cim_junk_blast_radius.sql` and decide on deleting the `data-*` junk attributes
 

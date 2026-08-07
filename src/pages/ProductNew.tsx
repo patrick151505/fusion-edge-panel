@@ -10,6 +10,7 @@ import AttributeBuilder, {
   type PendingTerm,
 } from "../components/product/AttributeBuilder";
 import ImagePreview from "../components/product/ImagePreview";
+import Model3DField from "../components/product/Model3DField";
 import MediaPicker from "../components/media/MediaPicker";
 import { useToast } from "../context/ToastContext";
 import { useCategories } from "../hooks/useCategories";
@@ -86,6 +87,7 @@ export default function ProductNew() {
   const [price, setPrice] = useState("");
   const [salePrice, setSalePrice] = useState("");
   const [images, setImages] = useState<string[]>([""]);
+  const [model3d, setModel3d] = useState("");
   const [published, setPublished] = useState(false);
   const [inStock, setInStock] = useState(true);
   const [featured, setFeatured] = useState(false);
@@ -245,6 +247,7 @@ export default function ProductNew() {
       category_id: categoryId || null,
       brand_id: brandId || null,
       company_id: companyId || null,
+      model_3d_url: model3d.trim() || null,
       short_description: shortDesc.trim() || null,
       description: descEmpty ? null : descHtml,
       price_cents: effectivePrice,
@@ -589,6 +592,10 @@ export default function ProductNew() {
                 revalidate({ images: next });
               }}
             />
+          </div>
+
+          <div className={shell}>
+            <Model3DField value={model3d} onChange={setModel3d} notify={notify} />
           </div>
 
           <div className={`${shell} space-y-5`}>
